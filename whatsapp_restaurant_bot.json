@@ -1,0 +1,608 @@
+{
+  "name": "WhatsApp Restaurant Bot - Production Ready",
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "phoneNumberId",
+        "events": ["message"]
+      },
+      "id": "whatsapp-trigger",
+      "name": "WhatsApp Trigger",
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "whatsapp-webhook",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "1",
+          "name": "WhatsApp Business API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.message.type }}",
+              "operation": "equals",
+              "value2": "text"
+            }
+          ]
+        }
+      },
+      "id": "check-message-type",
+      "name": "Check Message Type",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.message.type }}",
+              "operation": "equals",
+              "value2": "image"
+            }
+          ]
+        }
+      },
+      "id": "check-image",
+      "name": "Check If Payment Screenshot",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [460, 500]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "sheetId": "={{ $env.GOOGLE_SHEET_ID }}",
+        "range": "Menu!A:D",
+        "options": {}
+      },
+      "id": "get-menu",
+      "name": "Get Menu from Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [680, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.body.message.text }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=# Restaurant AI Assistant - System Prompt\n\nAap ek professional restaurant assistant hain jo Roman Urdu mein customers ki madad karte hain.\n\n## Your Role:\n- Restaurant: {{ $env.RESTAURANT_NAME || 'Fast Food Restaurant' }}\n- Language: Roman Urdu (primary), English (if needed)\n- Tone: Friendly, helpful, professional\n- Response Style: Clear, concise, actionable\n\n## Available Menu:\n{{ $('Get Menu from Sheets').all()[0].json.values }}\n\n## Core Responsibilities:\n\n1. **Menu Inquiries:**\n   - Display menu items with prices clearly\n   - Highlight available items only\n   - Suggest popular combinations\n   - Mention any ongoing deals\n\n2. **Order Taking:**\n   - Confirm each item and quantity\n   - Calculate total accurately\n   - Ask for delivery details (name, address, phone)\n   - Summarize order before finalizing\n\n3. **Payment Information:**\n   - Share payment methods (JazzCash/EasyPaisa)\n   - Provide account number: {{ $env.PAYMENT_NUMBER || '03XX-XXXXXXX' }}\n   - Request screenshot after payment\n   - Explain verification process\n\n4. **Customer Service:**\n   - Answer questions politely\n   - Handle complaints professionally\n   - Provide order status updates\n   - Thank customers genuinely\n\n## Response Guidelines:\n\n✅ DO:\n- Use Roman Urdu naturally (e.g., \"Assalam o Alaikum\", \"Shukriya\", \"Zaroor\")\n- Be warm and welcoming\n- Use emojis appropriately (🍔 🍕 ✅ 📱)\n- Keep responses under 200 words\n- Confirm understanding before proceeding\n- Offer alternatives if item unavailable\n\n❌ DON'T:\n- Use overly formal English\n- Give incorrect prices\n- Promise unavailable items\n- Share personal opinions\n- Argue with customers\n- Use technical jargon\n\n## Sample Responses:\n\n**Greeting:**\n\"Assalam o Alaikum! 👋 [Restaurant Name] mein khush amdeed! Main aapki kaise madad kar sakta hoon? Menu dekhne ke liye 'menu dikhao' likhein.\"\n\n**Menu Request:**\n\"📋 Hamara Menu:\n[List items with prices]\nKya order karna chahengy?\"\n\n**Order Confirmation:**\n\"✅ Aapka order:\n- [Items]\nTotal: Rs. [Amount]\nYe confirm karein? (Haan/Nahi)\"\n\n**Payment:**\n\"💰 Payment Details:\nTotal: Rs. [Amount]\nJazzCash/EasyPaisa: [Number]\nScreenshot zaroor bhejein! 📸\"\n\n## Error Handling:\n- If unclear: \"Maaf kijiye, main samajh nahi paya. Kya aap dobara bata sakte hain?\"\n- If unavailable: \"[Item] abhi available nahi. Kya [Alternative] try karein?\"\n- If confused: \"Koi baat nahi! Main madad ke liye hoon. Menu dekhein ya sawal poochein.\"\n\n## Important Rules:\n1. Always verify menu availability from database\n2. Never make up prices\n3. Always calculate totals accurately\n4. Confirm order details before finalizing\n5. Be patient with customers\n6. Maintain professional boundaries\n\nRemember: Aap restaurant ki pehli impression hain. Har customer ko special feel karwayein! 🌟"
+        }
+      },
+      "id": "ai-agent",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "model": "gemini-1.5-pro",
+        "options": {
+          "temperature": 0.7,
+          "maxOutputTokens": 500,
+          "topP": 0.9
+        }
+      },
+      "id": "gemini-chat-model",
+      "name": "Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [900, 380],
+      "credentials": {
+        "googleGeminiOAuth2Api": {
+          "id": "1",
+          "name": "Google Gemini API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const message = $input.first().json.body.message.text.toLowerCase();\nconst customerNumber = $input.first().json.body.from;\n\n// Check for order keywords\nconst orderKeywords = ['order', 'mangwana', 'chahiye', 'lena'];\nconst isOrder = orderKeywords.some(keyword => message.includes(keyword));\n\nif (isOrder) {\n  return [{ json: { intent: 'order', customerNumber, message } }];\n}\n\n// Check for menu keywords\nconst menuKeywords = ['menu', 'items', 'kya hai', 'available'];\nconst isMenu = menuKeywords.some(keyword => message.includes(keyword));\n\nif (isMenu) {\n  return [{ json: { intent: 'menu', customerNumber, message } }];\n}\n\n// Check for payment keywords\nconst paymentKeywords = ['payment', 'pay', 'paisa', 'account'];\nconst isPayment = paymentKeywords.some(keyword => message.includes(keyword));\n\nif (isPayment) {\n  return [{ json: { intent: 'payment', customerNumber, message } }];\n}\n\n// Default to general query\nreturn [{ json: { intent: 'general', customerNumber, message } }];"
+      },
+      "id": "intent-classifier",
+      "name": "Intent Classifier",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.intent }}",
+              "operation": "equals",
+              "value2": "order"
+            }
+          ]
+        }
+      },
+      "id": "route-intent",
+      "name": "Route by Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.first().json.orderItems || [];\nconst customerNumber = $input.first().json.customerNumber;\nconst customerName = $input.first().json.customerName || 'Customer';\n\nlet total = 0;\nlet invoiceText = `🧾 *INVOICE*\\n\\n`;\ninvoiceText += `Customer: ${customerName}\\n`;\ninvoiceText += `Order ID: ORD${Date.now()}\\n`;\ninvoiceText += `Date: ${new Date().toLocaleString('en-PK')}\\n\\n`;\ninvoiceText += `*Items:*\\n`;\ninvoiceText += `------------------------\\n`;\n\nitems.forEach(item => {\n  invoiceText += `${item.name} x${item.quantity}\\n`;\n  invoiceText += `Rs. ${item.price} x ${item.quantity} = Rs. ${item.price * item.quantity}\\n\\n`;\n  total += item.price * item.quantity;\n});\n\ninvoiceText += `------------------------\\n`;\ninvoiceText += `*Total: Rs. ${total}*\\n\\n`;\ninvoiceText += `Payment karne ke liye is number par transfer karein:\\n`;\ninvoiceText += `📱 *03XX-XXXXXXX* (JazzCash/EasyPaisa)\\n\\n`;\ninvoiceText += `Payment ke baad screenshot zaroor bhejein!\\n`;\ninvoiceText += `Shukriya! 🙏`;\n\nreturn [{ \n  json: { \n    invoice: invoiceText, \n    orderId: `ORD${Date.now()}`,\n    total,\n    customerNumber,\n    items\n  } \n}];"
+      },
+      "id": "generate-invoice",
+      "name": "Generate Invoice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "sheetId": "={{ $env.GOOGLE_SHEET_ID }}",
+        "range": "Orders!A:G",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        },
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "values": [
+            {
+              "column": "Order ID",
+              "fieldValue": "={{ $json.orderId }}"
+            },
+            {
+              "column": "Customer Number",
+              "fieldValue": "={{ $json.customerNumber }}"
+            },
+            {
+              "column": "Customer Name",
+              "fieldValue": "={{ $json.customerName }}"
+            },
+            {
+              "column": "Items",
+              "fieldValue": "={{ JSON.stringify($json.items) }}"
+            },
+            {
+              "column": "Total Amount",
+              "fieldValue": "={{ $json.total }}"
+            },
+            {
+              "column": "Status",
+              "fieldValue": "Pending Payment"
+            },
+            {
+              "column": "Timestamp",
+              "fieldValue": "={{ new Date().toISOString() }}"
+            }
+          ]
+        }
+      },
+      "id": "save-order",
+      "name": "Save Order to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1340, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "messageType": "text",
+        "recipientPhoneNumber": "={{ $json.customerNumber }}",
+        "message": "={{ $json.invoice || $json.response }}"
+      },
+      "id": "send-whatsapp-message",
+      "name": "Send WhatsApp Message",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [1560, 200],
+      "credentials": {
+        "whatsAppApi": {
+          "id": "1",
+          "name": "WhatsApp Business API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "sheetId": "={{ $env.GOOGLE_SHEET_ID }}",
+        "range": "Payments!A:F",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "values": [
+            {
+              "column": "Order ID",
+              "fieldValue": "={{ $json.orderId }}"
+            },
+            {
+              "column": "Customer Number",
+              "fieldValue": "={{ $json.body.from }}"
+            },
+            {
+              "column": "Amount",
+              "fieldValue": "={{ $json.amount }}"
+            },
+            {
+              "column": "Screenshot URL",
+              "fieldValue": "={{ $json.body.message.image.url }}"
+            },
+            {
+              "column": "Status",
+              "fieldValue": "Pending Confirmation"
+            },
+            {
+              "column": "Timestamp",
+              "fieldValue": "={{ new Date().toISOString() }}"
+            }
+          ]
+        }
+      },
+      "id": "save-payment-screenshot",
+      "name": "Save Payment Screenshot",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [680, 500],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "messageType": "text",
+        "recipientPhoneNumber": "={{ $env.OWNER_WHATSAPP_NUMBER }}",
+        "message": "=🔔 *New Payment Received*\n\nCustomer: {{ $json.body.from }}\nAmount: Rs. {{ $json.amount }}\nOrder ID: {{ $json.orderId }}\n\nScreenshot check karein aur confirm karein.\n\nReply with: CONFIRM {{ $json.orderId }}"
+      },
+      "id": "notify-owner",
+      "name": "Notify Owner",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [900, 500],
+      "credentials": {
+        "whatsAppApi": {
+          "id": "1",
+          "name": "WhatsApp Business API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "messageType": "text",
+        "recipientPhoneNumber": "={{ $json.body.from }}",
+        "message": "Shukriya! Aapka payment screenshot mil gaya hai. ✅\n\nOwner confirm kar rahe hain, thori der mein aapko confirmation mil jayegi. 🙏"
+      },
+      "id": "confirm-receipt",
+      "name": "Confirm Receipt to Customer",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [1120, 500],
+      "credentials": {
+        "whatsAppApi": {
+          "id": "1",
+          "name": "WhatsApp Business API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.message.text }}",
+              "operation": "contains",
+              "value2": "CONFIRM"
+            }
+          ]
+        }
+      },
+      "id": "check-owner-confirmation",
+      "name": "Check Owner Confirmation",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "const message = $input.first().json.body.message.text;\nconst orderId = message.split('CONFIRM ')[1]?.trim();\n\nreturn [{ json: { orderId } }];"
+      },
+      "id": "extract-order-id",
+      "name": "Extract Order ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 700]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "sheetId": "={{ $env.GOOGLE_SHEET_ID }}",
+        "range": "Orders!F:F",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        },
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "values": [
+            {
+              "column": "Status",
+              "fieldValue": "Confirmed"
+            }
+          ]
+        }
+      },
+      "id": "update-order-status",
+      "name": "Update Order Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1120, 700],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "read",
+        "sheetId": "={{ $env.GOOGLE_SHEET_ID }}",
+        "range": "Orders!A:G",
+        "options": {}
+      },
+      "id": "get-customer-number",
+      "name": "Get Customer Number",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1340, 700],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "messageType": "text",
+        "recipientPhoneNumber": "={{ $json.customerNumber }}",
+        "message": "=🎉 *Payment Confirmed!*\n\nAapka order confirm ho gaya hai! ✅\n\nHum jald hi aapka order prepare kar rahe hain.\n\nShukriya aapke order ke liye! 🙏\n\nOrder ID: {{ $json.orderId }}"
+      },
+      "id": "send-confirmation",
+      "name": "Send Confirmation to Customer",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [1560, 700],
+      "credentials": {
+        "whatsAppApi": {
+          "id": "1",
+          "name": "WhatsApp Business API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "WhatsApp Trigger": {
+      "main": [
+        [
+          {
+            "node": "Check Message Type",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check If Payment Screenshot",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check Owner Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Message Type": {
+      "main": [
+        [
+          {
+            "node": "Intent Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intent Classifier": {
+      "main": [
+        [
+          {
+            "node": "Route by Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Intent": {
+      "main": [
+        [
+          {
+            "node": "Get Menu from Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Menu from Sheets": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Invoice": {
+      "main": [
+        [
+          {
+            "node": "Save Order to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Order to Sheets": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Payment Screenshot": {
+      "main": [
+        [
+          {
+            "node": "Save Payment Screenshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Payment Screenshot": {
+      "main": [
+        [
+          {
+            "node": "Notify Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Owner": {
+      "main": [
+        [
+          {
+            "node": "Confirm Receipt to Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Owner Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Extract Order ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Order ID": {
+      "main": [
+        [
+          {
+            "node": "Update Order Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Order Status": {
+      "main": [
+        [
+          {
+            "node": "Get Customer Number",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Customer Number": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation to Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
